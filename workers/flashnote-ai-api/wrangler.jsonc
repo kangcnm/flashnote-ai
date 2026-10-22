@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flashnote-ai-api",
+  "main": "worker.mjs",
+  "account_id": "2dc2aaa38def770058761e4b188b1d36",
+  "compatibility_date": "2026-08-06",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{"name":"GENERATION_QUOTA","class_name":"GenerationQuota"}]
+  },
+  "migrations": [{"tag":"flashnote-quota-v1","new_sqlite_classes":["GenerationQuota"]}]
+}
