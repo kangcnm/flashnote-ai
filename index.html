@@ -42,9 +42,11 @@
         <label class="label" for="topic">课程 / 主题</label><input class="input" id="topic" placeholder="例如：建筑设备 · 消防水泵" value="建筑智能化 · 消防与楼宇自控">
         <label class="label" for="notes">粘贴课堂笔记或知识点</label><textarea class="textarea" id="notes" placeholder="例如：\n消防水泵可以由消防联动控制器自动启动，也可通过消防控制室手动直接控制等。\n光纤分为单模和多模，用于不同距离的传输。">消防水泵可以由消防联动控制器自动启动；消防控制室也应具备手动直接控制能力。
 单模光纤适合长距离传输；多模光纤常用于较短距离通信。</textarea>
-        <div class="control-row"><div><label class="label" for="amount">生成数量</label><select class="select" id="amount"><option value="5">5 张</option><option value="8" selected>8 张</option><option value="12">12 张</option></select></div><div><label class="label" for="level">难度</label><select class="select" id="level"><option value="入门" selected>入门</option><option value="进阶">进阶</option><option value="混合">混合</option></select></div></div>
+        <div class="control-row"><div><label class="label" for="amount">生成数量</label><select class="select" id="amount"><option value="5" selected>5 张</option><option value="8">8 张</option><option value="12">12 张</option></select></div><div><label class="label" for="level">难度</label><select class="select" id="level"><option value="入门" selected>入门</option><option value="进阶">进阶</option><option value="混合">混合</option></select></div></div>
+        <p class="muted">建议先生成 5 张，较长笔记可分段处理。生成时请保持页面打开。</p>
         <div id="turnstile-container" style="margin-top:16px"></div>
-        <div class="row" style="margin-top:16px"><button class="btn btn-main" id="btnGenerateAI" disabled>AI 生成卡片</button><button class="btn btn-blue" id="btnCopyPrompt">复制 AI 制卡提示词</button><a class="btn btn-outline" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">打开 ChatGPT ↗</a></div><p class="statusline" id="generateStatus" role="status" aria-live="polite"></p>
+        <div class="row" style="margin-top:16px"><button class="btn btn-main" id="btnGenerateAI" disabled>AI 生成卡片</button><button class="btn btn-outline" id="btnCheckConnection">检测连接</button><button class="btn btn-blue" id="btnCopyPrompt">复制 AI 制卡提示词</button><a class="btn btn-outline" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">打开 ChatGPT ↗</a></div><p class="statusline" id="generateStatus" role="status" aria-live="polite"></p>
+        <p class="statusline" id="connectionStatus" role="status" aria-live="polite"></p>
         <div class="subsection"><h2>导入 AI 生成的题卡</h2><p class="hint">粘贴 AI 的回答，每行格式为：问题 || 答案 || 标签。也支持从示例直接导入。</p><textarea class="textarea" id="aiResult" placeholder="什么是单模光纤？ || 用于较长距离传输的光纤类型。 || 综合布线\n消防水泵如何手动启动？ || 在消防控制室可进行手动直接控制。 || 消防"></textarea><div class="row" style="margin-top:12px"><button class="btn btn-main" id="btnImportAI">导入卡片</button><button class="btn btn-ghost" id="btnExample">填入格式示例</button></div><p class="statusline" id="importStatus"></p></div>
       </div>
       <aside class="box"><h2>不用 AI 也能做卡</h2><p class="hint">最适合先测试功能、练习开发。</p><label class="label" for="manualQ">问题</label><textarea class="textarea short" id="manualQ" placeholder="例如：PLC 是什么？"></textarea><label class="label" for="manualA">答案</label><textarea class="textarea short" id="manualA" placeholder="写下你核实过的答案"></textarea><label class="label" for="manualTag">标签</label><input class="input" id="manualTag" value="我的课程"><button class="btn btn-blue" id="btnAddManual" style="width:100%;margin-top:13px">+ 新增一张卡</button>
@@ -96,6 +98,21 @@ function downloadFile(name,content,type){const blob=new Blob([content],{type}),h
 function importBackup(raw){if(!Array.isArray(raw))throw new Error('格式错误：必须是卡片列表');if(raw.length>10000)throw new Error('备份卡片数量过多');const validated=raw.map(safeCard).filter(Boolean);if(!validated.length)throw new Error('没有找到有效卡片');const existing=new Set(cards.map(c=>c.id));let count=0;for(const c of validated){if(!existing.has(c.id)){cards.push(c);existing.add(c.id);count++}}save();renderAll();return count}
 document.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.nav)));document.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.tab)));
 $('cardDisplay').addEventListener('click',flip);$('cardDisplay').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();flip()}});$('btnRight').addEventListener('click',()=>answer(true));$('btnWrong').addEventListener('click',()=>answer(false));$('btnSkip').addEventListener('click',next);$('showAll').addEventListener('change',()=>{currentId=null;allIndex=0;flipped=false;renderAll()});
+const GENERATE_URL='https://flashnote-ai-api.lichunjiu322.workers.dev/api/generate';
+async function checkBackendConnection(){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
+ try{
+  const response=await fetch(GENERATE_URL.replace('/api/generate','/health'),{method:'GET',cache:'no-store',signal:controller.signal});
+  if(!response.ok)return 'unavailable';
+  const data=await response.json();
+  return data&&data.ok===true&&data.service==='flashnote-ai-api'?'reachable':'unavailable';
+ }catch{return 'unreachable'}finally{clearTimeout(timer)}
+}
+async function showConnectionCheck(){
+ const btn=$('btnCheckConnection'),status=$('connectionStatus');btn.disabled=true;status.textContent='正在检测制卡服务器连接，不会调用 AI…';
+ try{const result=await checkBackendConnection();status.textContent=result==='reachable'?'制卡服务器当前可连接；这个检查不代表 AI 生成一定成功。':result==='unavailable'?'已连接到服务器，但服务返回异常，请稍后再试。':'当前网络无法连接制卡服务器。请切换 Wi-Fi 或移动数据再检测；若仍失败，需要调整接口访问方式。'}finally{btn.disabled=false}
+}
+
 let turnstileToken='',turnstileWidget=null,aiBusy=false;
 const TURNSTILE_SITE_KEY='0x4AAAAAAFgXPZO-rIU_rU_d'; // Public Site Key; no Secret Key belongs here.
 function syncGenerateButton(){ $('btnGenerateAI').disabled=aiBusy||!turnstileToken }
@@ -106,9 +123,9 @@ function initChallenge(){
  if(!window.turnstile)return;
  turnstileWidget=window.turnstile.render('#turnstile-container',{
   sitekey:TURNSTILE_SITE_KEY,action:'generate',size:'flexible',
-  callback:token=>{turnstileToken=token;syncGenerateButton();$('generateStatus').textContent='验证完成，可以生成卡片。'},
-  'expired-callback':()=>{turnstileToken='';syncGenerateButton();$('generateStatus').textContent='验证已过期，请重新验证。'},
-  'error-callback':()=>{turnstileToken='';syncGenerateButton();$('generateStatus').textContent='安全验证加载失败，请刷新页面。'}
+  callback:token=>{turnstileToken=token;syncGenerateButton();const status=$('generateStatus');if(!aiBusy&&(!status.textContent||status.textContent.startsWith('验证')))status.textContent='验证完成，可以生成卡片。'},
+  'expired-callback':()=>{turnstileToken='';syncGenerateButton();if(!aiBusy&&!$('generateStatus').textContent.startsWith('生成失败'))$('generateStatus').textContent='验证已过期，请重新验证。'},
+  'error-callback':()=>{turnstileToken='';syncGenerateButton();if(!aiBusy&&!$('generateStatus').textContent.startsWith('生成失败'))$('generateStatus').textContent='安全验证加载失败，请刷新页面。'}
  });
 }
 window.flashnoteTurnstileReady=()=>{if(activeTab==='create')initChallenge()};
@@ -116,6 +133,7 @@ window.flashnoteTurnstileReady=()=>{if(activeTab==='create')initChallenge()};
 async function generateWithAI(){
  const btn=$('btnGenerateAI'),status=$('generateStatus');
  if(aiBusy)return;
+ if(navigator.onLine===false){status.textContent='生成失败：设备当前处于离线状态，请先连接网络。';return}
  if(!turnstileToken){status.textContent='请先完成安全验证。';return}
  const notes=$('notes').value.trim();
  if(!notes){status.textContent='请先输入课堂笔记。';toast('请先输入笔记');return}
@@ -123,17 +141,22 @@ async function generateWithAI(){
  const amount=Number($('amount').value)||8;
  const level=$('level').value||'入门';
  const oldText=btn.textContent;
+ const controller=new AbortController(),started=Date.now();
+ const timeout=setTimeout(()=>controller.abort(),65000);
  const token=turnstileToken;turnstileToken='';aiBusy=true;
  btn.disabled=true;btn.textContent='正在生成…';
- status.textContent='正在调用 DeepSeek，请稍候；请勿关闭页面。';
+ status.textContent='正在生成，请保持页面打开…';
+ const progress=setInterval(()=>{const elapsed=Math.floor((Date.now()-started)/1000);status.textContent=elapsed<20?'正在生成（已等待 '+elapsed+' 秒）…':'AI 仍在处理（已等待 '+elapsed+' 秒），请保持页面打开；下次可先生成5张。'},1000);
  try{
-  const response=await fetch('https://flashnote-ai-api.lichunjiu322.workers.dev/api/generate',{
+  const response=await fetch(GENERATE_URL,{
    method:'POST',
    headers:{'Content-Type':'application/json'},
+   signal:controller.signal,
    body:JSON.stringify({topic,notes,amount,level,turnstileToken:token})
   });
   let data;
-  try{data=await response.json()}catch(e){throw new Error('服务器返回了无法识别的内容，请稍后重试。')}
+  try{data=await response.json()}catch(e){if(controller.signal.aborted||e?.name==='AbortError')throw e;throw new Error(response.status===504?'服务器等待 AI 响应超时，请稍后重试，或先生成5张。':'服务器返回内容异常，请稍后重试。')}
+  if(!data||typeof data!=='object')throw new Error('服务器返回内容异常，请稍后重试。');
   if(!response.ok||!data.ok){
    if(data&&data.providerStatus===402)throw new Error('DeepSeek API 余额不足或账户不可用，请检查官方平台。');
    if(data&&(data.providerStatus===401||data.providerStatus===403))throw new Error('DeepSeek API 密钥或模型权限可能有问题，请检查 Cloudflare Secret。');
@@ -148,11 +171,19 @@ async function generateWithAI(){
   toast('AI 制卡成功：已添加 '+newCards.length+' 张');
   $('aiResult').value='';navigate('library');
  }catch(err){
-  const message=err&&err.name==='TypeError'?'无法连接后端，请检查网络或稍后重试。':((err&&err.message)||'生成失败，请稍后重试。');
+  clearInterval(progress);clearTimeout(timeout);
+  let message;
+  if(controller.signal.aborted||err?.name==='AbortError')message='等待超过65秒，已停止等待。服务器可能已收到请求，请勿连续重复提交；可先选择5张再试。';
+  else if(err?.name==='TypeError'){
+   status.textContent='生成连接中断，正在检测服务器连接…';
+   const connection=await checkBackendConnection();
+   message=connection==='reachable'?'生成连接中断，服务器当前可连接。请稍后重试，先生成5张并保持页面打开；不要连续点击。':'当前网络无法连接制卡服务器。请先点击“检测连接”，切换 Wi-Fi 或移动数据后再试。';
+  }else message=err?.message||'生成失败，请稍后重试。';
   status.textContent='生成失败：'+message;toast('AI 制卡失败：'+message);
- }finally{aiBusy=false;btn.textContent=oldText;resetChallenge()}
+ }finally{clearInterval(progress);clearTimeout(timeout);aiBusy=false;btn.textContent=oldText;resetChallenge()}
 }
 $('btnGenerateAI').addEventListener('click',generateWithAI);
+$('btnCheckConnection').addEventListener('click',showConnectionCheck);
 $('btnCopyPrompt').addEventListener('click',()=>{if(!$('notes').value.trim()){toast('请先填写笔记');return}copy(makePrompt())});$('btnExample').addEventListener('click',()=>{$('aiResult').value='什么是 PLC？ || 可编程逻辑控制器，用于工业自动化控制。 || 自动化\n什么是单模光纤？ || 通常用于较长距离传输的光纤类型。 || 综合布线';toast('已填入两张示例题卡')});
 $('btnImportAI').addEventListener('click',()=>{const {entries,bad}=parseImport($('aiResult').value);if(!entries.length){$('importStatus').textContent='没有识别到题卡。请确认每行包含“问题 || 答案 || 标签”';return}let count=0;for(const row of entries.slice(0,200)){if(addCard(...row))count++}$('importStatus').textContent=`已导入 ${count} 张卡片${bad.length?`；有 ${bad.length} 行格式不符合要求，已跳过`:''}`;toast(`成功导入 ${count} 张卡片`);$('aiResult').value='';navigate('library')});
 $('btnAddManual').addEventListener('click',()=>{const q=$('manualQ').value.trim(),a=$('manualA').value.trim(),tag=$('manualTag').value.trim()||'未分类';if(!addCard(q,a,tag)){toast('问题和答案都需要填写');return}$('manualQ').value='';$('manualA').value='';toast('已添加一张卡片');navigate('library')});$('btnLocal').addEventListener('click',fromNotes);
